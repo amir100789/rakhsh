@@ -1,0 +1,59 @@
+{
+  "log": {
+    "loglevel": "info",
+    "access": "/data/data/com.termux/files/home/.cache/xray/access.log",
+    "error": "/data/data/com.termux/files/home/.cache/xray/error.log"
+  },
+  "inbounds": [
+    {
+      "port": 1819,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      },
+      "settings": {
+        "auth": "noauth",
+        "udp": true,
+        "userLevel": 0
+      },
+      "tag": "socks-in"
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "your-server.com",
+            "port": 443,
+            "users": [
+              {
+                "id": "your-uuid",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "fingerprint": "chrome",
+          "serverName": "cloudflare.com",
+          "publicKey": "your-public-key"
+        }
+      },
+      "tag": "proxy"
+    },
+    {
+      "protocol": "direct",
+      "tag": "direct"
+    }
+  ]
+}

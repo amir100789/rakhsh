@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Rakhsh — Interactive CLI for Network Core Management
+Version: 1.0.0
+Platforms: Linux, Termux
+Cores: Aether (MASQUE) | Sing-Box | XRay
+Port: 1819
+"""
+
+import os, sys, subprocess, signal, time, json, argparse
+from pathlib import Path
+
+# --- Colors ---
+RESET = "\033[0m"
+BOLD = "\033[1m"
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+MAGENTA = "\033[95m"
+CYAN = "\033[96m"
+WHITE = "\033[97m"
+
+APP_NAME = "Rakhsh"
+VERSION = "1.0.0"
+DEFAULT_PORT = 1819
+
+# Directory structure: bin/ is bundled
+BASE_DIR = Path(__file__).parent.resolve()
+BIN_DIR = BASE_DIR / "bin"
+CONFIG_DIR = Path.home() / ".config" / "rakhsh"
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+CORES = {
+    "aether": {
+        "label": "Aether (MASQUE / WG / Gool / MIM / Tor)",
+        "binary_path": BIN_DIR / "aether",
+        "protocols": ["masque", "masque-h2", "wireguard", "gool", "mim", "tor"],
+        "config_file": CONFIG_DIR / "aether.toml",
+    },
+    "sing-box": {
+        "label": "Sing-Box (VLESS / Trojan / Reality / Hysteria2)",
+        "binary_path": BIN_DIR / "sing-box",
+        "protocols": ["vless", "trojan", "vmess", "shadowtls", "reality", "hysteria2", "tun"],
+        "config_file": CONFIG_DIR / "sing-box.json",
+    },
+    "xray": {
+        "label": "XRay (VLESS / Trojan / Reality / gRPC / WS)",
+        "binary_path": BIN_DIR / "xray",
+        "protocols": ["vless", "trojan", "vmess", "reality", "grpc", "ws"],
+        "config_file": CONFIG_DIR / "xray.json",
+    },
+}
+
+PID_FILE = CONFIG_DIR / ".rakhsh.pid"
+LOG_FILE = CONFIG_DIR / ".rakhsh.log"
+
+# --- Utilities ---
+def clear():
+    os.system("clear" if os.name == "posix" else "cls")
+
+def print_banner():
+    print(f"""
+{CYAN}╔════════════════════════════════════════════════════════════╗{RESET}
+{CYAN}║{BOLD}                    {APP_NAME}  v{VERSION:<5}                     {RESET}{CYAN}║{RESET}
+{CYAN}║{RESET}     Interactive CLI — Linux & Termux — Port: {DEFAULT_PORT:<4}     {CYAN}║{RESET}
+{CYAN}║{RESET}         Aether  |  Sing-Box  |  XRay  —  Bundled          {CYAN}║{RESET}
+{CYAN}╚════════════════════════════════════════════════════════════╝{RESET}
+""")
+
+def print_ok(msg): print(f"{GREEN}[OK]{RESET} {msg}")
+def print_err(msg): print(f"{RED}[ERR]{RESET} {msg}")
+def print_info(msg): print(f"{BLUE}[INFO]{RESET} {msg}")
+def print_warn(msg): print(f"{YELLOW}[WARN]{RESET} {msg}")
+
+def ask(prompt):
+    try:
+        return input(f"{MAGENTA}> {RESET}{prompt}: ")
+    except EOFError:
+        return ""
+
+def save_config(core, data):
+    path = CORES[core]["config_file"]
+    try:
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        print_ok(f"Config saved → {path}")
+    except Exception as e:
+        print_err(f"Failed to save config: {e}")
+
+def load_config(core):
+    path = CORES[core]["config_file"]
+    return json.loads(path.read_text()) if path.exists() else {}
+
+# --- Process Management ---
+def is_running():
+    if not PID_FILE.exists(): return False, None
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+        return True, pid
+    except:
+        return False, None
+
+def save_pid(pid): PID_FILE.write_text(str(pid))
+def remove_pid(): PID_FILE.unlink() if PID_FILE.exists() else None
+
+def kill_core():
+    running, pid = is_running()
+    if running and pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(0.5)
+            try: os.kill(pid, 0); os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            print_ok(f"Stopped (PID: {pid})")
+            return True
+        except Exception as e:
+            print_err(f"Stop error: {e}")
+            return False
+    else:
+        print_warn("Nothing is running.")
+        return False
+
+# --- Menus ---
+def menu_main():
+    while True:
+        clear(); print_banner()
+        print(f"{BOLD}{WHITE}Main Menu{RESET}\n")
+        print(f"  {CYAN}[1]{RESET} Start Core")
+        print(f"  {CYAN}[2]{RESET} Switch Core")
+        print(f"  {CYAN}[3]{RESET} Protocol / Advanced Settings")
+        print(f"  {CYAN}[4]{RESET} Status & Log")
+        print(f"  {CYAN}[5]{RESET} Stop Running Core")
+        print(f"  {CYAN}[6]{RESET} Exit")
+        print()
+        choice = ask("Select")
+        if choice == "1": menu_start()
+        elif choice == "2": menu_switch()
+        elif choice == "3": menu_protocol()
+        elif choice == "4": menu_status()
+        elif choice == "5": kill_core(); input("Press Enter...")
+        elif choice == "6":
+            clear(); print(f"{MAGENTA}Goodbye!{RESET}\n"); sys.exit(0)
+        else:
+            print_err("Invalid choice"); time.sleep(1)
+
+def menu_start():
+    clear(); print_banner()
+    print(f"{BOLD}{WHITE}Select Core to Launch{RESET}\n")
+    for i, (k, v) in enumerate(CORES.items(), 1):
+        exists = "✓" if v["binary_path"].exists() else "✗"
+        color = GREEN if v["binary_path"].exists() else RED
+        print(f"  {CYAN}[{i}]{RESET} {v['label']} {color}{exists}{RESET}")
+    print(f"  {CYAN}[0]{RESET} Back")
+    choice = ask("Select")
+    try:
+        idx = int(choice)
+        if idx == 0: return
+        start_core(list(CORES.keys())[idx - 1])
+    except:
+        print_err("Invalid"); time.sleep(1)
+
+def menu_switch():
+    clear(); print_banner()
+    print(f"{BOLD}{WHITE}Switch Active Core{RESET}\n")
+    for i, (k, v) in enumerate(CORES.items(), 1):
+        print(f"  {CYAN}[{i}]{RESET} {v['label']} → {k}")
+    print(f"  {CYAN}[0]{RESET} Back")
+    choice = ask("Select")
+    try:
+        idx = int(choice)
+        if idx == 0: return
+        core_key = list(CORES.keys())[idx - 1]
+        (CONFIG_DIR / ".active_core").write_text(core_key)
+        print_ok(f"Active core switched to {core_key}")
+        input("Press Enter...")
+    except:
+        print_err("Invalid"); time.sleep(1)
+
+def menu_protocol():
+    clear(); print_banner()
+    active = (CONFIG_DIR / ".active_core").read_text().strip() if (CONFIG_DIR / ".active_core").exists() else "aether"
+    active = active if active in CORES else "aether"
+    val = CORES[active]
+    print(f"{BOLD}{WHITE}Protocol Settings for: {val['label']}{RESET}\n")
+    for p in val["protocols"]:
+        print(f"    {CYAN}›{RESET} {p}")
+    proto = ask("Protocol name (Enter for default)") or val["protocols"][0]
+    data = load_config(active)
+    data["protocol"] = proto; data["port"] = DEFAULT_PORT
+    save_config(active, data)
+    print_ok(f"Protocol {proto} set with port {DEFAULT_PORT}")
+    input("Press Enter...")
+
+def menu_status():
+    clear(); print_banner()
+    running, pid = is_running()
+    active = (CONFIG_DIR / ".active_core").read_text().strip() if (CONFIG_DIR / ".active_core").exists() else "aether"
+    active = active if active in CORES else "aether"
+    print(f"{BOLD}{WHITE}Status{RESET}\n")
+    print(f"  App: {APP_NAME} v{VERSION}")
+    print(f"  Active Core: {BLUE}{CORES.get(active,{}).get('label', active)}{RESET}")
+    print(f"  Status: {'{GREEN}Running{RESET}' if running else '{RED}Stopped{RESET}'}")
+    if running: print(f"  PID: {pid}")
+    print(f"  Default Port: {DEFAULT_PORT}")
+    print(f"  Config Dir: {CONFIG_DIR}")
+    print(f"\n  {BOLD}Bundled Binaries:{RESET}")
+    for k, v in CORES.items():
+        bp = v["binary_path"]
+        status = f"{GREEN}Present{RESET}" if bp.exists() else f"{RED}Missing{RESET}"
+        print(f"    {k}: {status}" + (f" ({bp})" if bp.exists() else ""))
+    if LOG_FILE.exists():
+        print(f"\n  {BOLD}Last Log Lines:{RESET}")
+        for line in LOG_FILE.read_text().splitlines()[-5:]:
+            print(f"    {line}")
+    input("Press Enter...")
+
+# --- Launch ---
+def start_core(core_key):
+    running, _ = is_running()
+    if running:
+        print_warn("A core is already running. Stop it first.")
+        input("Press Enter...")
+        return
+    val = CORES.get(core_key)
+    if not val:
+        print_err(f"Unknown core: {core_key}")
+        return
+    if not val["binary_path"].exists():
+        print_err(f"Binary not bundled: {val['binary_path']}")
+        print_info("Run install or download binaries first.")
+        input("Press Enter...")
+        return
+    config = load_config(core_key)
+    if not config:
+        config = {"protocol": val["protocols"][0], "port": DEFAULT_PORT, "bind": "127.0.0.1"}
+    proto = config.get("protocol", val["protocols"][0])
+    port = config.get("port", DEFAULT_PORT)
+    (CONFIG_DIR / ".active_core").write_text(core_key)
+
+    # Build command
+    cmd = []
+    if core_key == "aether":
+        cmd = [str(val["binary_path"]), "--masque", "-4", "--scan", "balanced", "--bind", "127.0.0.1:1819"]
+        if proto == "wireguard" or proto == "wg": cmd = [str(val["binary_path"]), "--wg", "-4"]
+        elif proto == "gool": cmd.append("--gool")
+        elif proto == "mim": cmd.append("--mim")
+        elif proto == "tor": cmd.append("--tor")
+        elif proto == "masque-h2": cmd = [str(val["binary_path"]), "--masque", "--h2", "-4"]
+        else: cmd.extend(["--masque"])
+    elif core_key == "sing-box":
+        config_path = val["config_file"]
+        basic = {
+            "log": {"level": "info", "timestamp": True},
+            "dns": {"final": "local", "independent_cache": True},
+            "inbounds": [{"type":"socks","tag":"socks-in","listen":"127.0.0.1","listen_port":port,"tcp_fast_open":True,"udp_fragment":True,"sniffing":["http","tls","quic"]}],
+            "outbounds": [{"type":proto if proto in val["protocols"] else "direct","tag":"proxy"}],
+        }
+        if not config_path.exists(): config_path.write_text(json.dumps(basic, indent=2))
+        cmd = [str(val["binary_path"]), "run", "-c", str(config_path)]
+    elif core_key == "xray":
+        config_path = val["config_file"]
+        basic = {
+            "log": {"loglevel":"info","access":"/dev/null","error":"/dev/null"},
+            "inbounds":[{"port":port,"listen":"127.0.0.1","protocol":"socks","sniffing":{"enabled":True,"destOverride":["http","tls","quic"]},"settings":{"auth":"noauth","udp":True},"tag":"socks-in"}],
+            "outbounds":[{"protocol":proto if proto in val["protocols"] else "vmess","tag":"proxy"},{"protocol":"direct","tag":"direct"}],
+        }
+        if not config_path.exists(): config_path.write_text(json.dumps(basic, indent=2))
+        cmd = [str(val["binary_path"]), "-config", str(config_path)]
+
+    stdout_path = CONFIG_DIR / f"{core_key}_stdout.log"
+    stderr_path = CONFIG_DIR / f"{core_key}_stderr.log"
+    with open(LOG_FILE, "a") as log:
+        log.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting {core_key} ({proto}) on port {port}\n")
+        log.write(f"Command: {' '.join(cmd)}\n")
+
+    print_info(f"Launching {val['label']} ({proto}) on port {port} ...")
+    print_info(f"Command: {' '.join(cmd)}")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=open(stdout_path,"w"), stderr=open(stderr_path,"w"),
+            stdin=subprocess.DEVNULL, start_new_session=True, close_fds=True
+        )
+        save_pid(proc.pid)
+        time.sleep(1)
+        try:
+            os.kill(proc.pid, 0)
+            print_ok(f"{val['label']} started (PID: {proc.pid}, Port: {port})")
+        except ProcessLookupError:
+            print_err("Process died immediately. Check error log.")
+            with open(stderr_path) as f: lines = f.read().splitlines()[-5:]
+            for line in lines: print(f"  {RED}>{RESET} {line}")
+    except Exception as e:
+        print_err(f"Launch error: {e}")
+    input("Press Enter...")
+
+# --- CLI ---
+def cli_main():
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} — Interactive CLI")
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} v{VERSION}")
+    parser.add_argument("--core", choices=list(CORES.keys()), default="aether")
+    parser.add_argument("--protocol", default="masque")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--start", action="store_true")
+    parser.add_argument("--stop", action="store_true")
+    parser.add_argument("--status", action="store_true")
+    parser.add_argument("--interactive", "-i", action="store_true")
+    args = parser.parse_args()
+    if args.status:
+        running, pid = is_running()
+        print(f"Status: {'Running (PID: '+str(pid)+')' if running else 'Stopped'}")
+        return
+    if args.stop:
+        kill_core()
+        return
+    if args.start:
+        start_core(args.core)
+        return
+    menu_main()
+
+if __name__ == "__main__":
+    try:
+        cli_main()
+    except KeyboardInterrupt:
+        print(f"\n{YELLOW}[!] Interrupted by user{RESET}")
+        sys.exit(0)

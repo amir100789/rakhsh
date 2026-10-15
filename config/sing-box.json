@@ -1,0 +1,47 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "final": "local",
+    "independent_cache": true
+  },
+  "inbounds": [
+    {
+      "type": "socks",
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "listen_port": 1819,
+      "tcp_fast_open": true,
+      "udp_fragment": true,
+      "sniffing": [
+        "http",
+        "tls",
+        "quic"
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "proxy-select",
+      "outbounds": ["proxy"]
+    },
+    {
+      "type": "vless",
+      "tag": "proxy",
+      "server": "your-server.com",
+      "server_port": 443,
+      "uuid": "your-uuid-here",
+      "tls": {
+        "enabled": true,
+        "server_name": "cloudflare.com"
+      }
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "proxy"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "protocol": "masque",
+  "port": 1819,
+  "bind": "127.0.0.1",
+  "scan_mode": "balanced"
+}
